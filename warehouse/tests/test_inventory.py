@@ -7,7 +7,8 @@ class TestInventory(TransactionCase):
     def setUp(self):
         super(TestInventory, self).setUp()
 
-        self.env.ref('core.goods_category_1').account_id = self.env.ref('finance.account_goods').id
+        self.env.ref('core.goods_category_1').account_id = self.env.ref(
+            'finance.account_goods').id
         self.env.ref('warehouse.wh_in_whin1').date = '2016-02-06'
         self.env.ref('warehouse.wh_in_whin3').date = '2016-02-06'
 
@@ -36,6 +37,7 @@ class TestInventory(TransactionCase):
         # 键鼠套装  96     2
         # 鼠标     1      1
         # 网线     48     1
+        self.temp_mouse_in.location_id = self.env.ref('warehouse.b001_location').id
         self.others_in.approve_order()
         self.others_in_2.approve_order()
         self.temp_mouse_in.action_done()
@@ -57,16 +59,17 @@ class TestInventory(TransactionCase):
         self.temp_mouse_in_zero_qty.action_done()
 
         self.inventory = self.env['wh.inventory'].create({
-                'warehouse_id': self.browse_ref('warehouse.hd_stock').id,
-                })
+            'warehouse_id': self.browse_ref('warehouse.hd_stock').id,
+        })
         self.inventory.query_inventory()
 
     def test_query_inventory(self):
         # 盘点单查询的结果必须和每个商品单据查询的结果一致
         for line in self.inventory.line_ids:
             goods_stock = line.goods_id.get_stock_qty()[0]
-            self.assertEqual(goods_stock.get('warehouse'), line.warehouse_id.name)
-            if line.goods_id.name == u'网线': # 网线在途移库 120个，盘点时应减去
+            self.assertEqual(goods_stock.get('warehouse'),
+                             line.warehouse_id.name)
+            if line.goods_id.name == u'网线':  # 网线在途移库 120个，盘点时应减去
                 self.assertEqual(goods_stock.get('qty') - 120, line.real_qty)
             else:
                 self.assertEqual(goods_stock.get('qty'), line.real_qty)
@@ -78,7 +81,7 @@ class TestInventory(TransactionCase):
             self.assertEqual(line.warehouse_id, self.sh_warehouse)
 
         # 指定商品的时候，选择的行必须是该商品的
-        self.inventory.goods = [4,self.goods_mouse.id]    #u'鼠标'
+        self.inventory.goods = [4, self.goods_mouse.id]  # u'鼠标'
         self.inventory.query_inventory()
         for line in self.inventory.line_ids:
             self.assertEqual(line.goods_id.name, u'鼠标')
@@ -133,7 +136,8 @@ class TestInventory(TransactionCase):
         # 实际辅助数量改变的时候，实际数量应该跟着改变
         mouse.inventory_uos_qty = mouse.real_uos_qty + 1
         mouse.onchange_uos_qty()
-        self.assertEqual(mouse.goods_id.conversion_unit(mouse.inventory_uos_qty), mouse.inventory_qty)
+        self.assertEqual(mouse.goods_id.conversion_unit(
+            mouse.inventory_uos_qty), mouse.inventory_qty)
 
         mouse.line_role_back()
         mouse.inventory_qty = mouse.real_qty + 1
@@ -147,8 +151,10 @@ class TestInventory(TransactionCase):
         self.assertTrue(self.inventory.in_id)
 
         # 验证商品
-        self.assertEqual(self.inventory.out_id.line_out_ids.goods_id, cable.goods_id)
-        self.assertEqual(self.inventory.in_id.line_in_ids.goods_id, mouse.goods_id)
+        self.assertEqual(
+            self.inventory.out_id.line_out_ids.goods_id, cable.goods_id)
+        self.assertEqual(
+            self.inventory.in_id.line_in_ids.goods_id, mouse.goods_id)
 
         # 验证数量
         self.assertEqual(self.inventory.out_id.line_out_ids.goods_qty, 1)
@@ -193,6 +199,50 @@ class TestInventory(TransactionCase):
 
         self.assertEqual(results, real_results)
 
+    def test_check_done_state_done(self):
+        ''' Test: check_done state == 'done' '''
+        mouse_line = self.browse_ref('warehouse.wh_move_line_12')
+        mouse_line.action_done()
+        for line in self.inventory.line_ids:
+            if line.goods_id.name == u'鼠标':
+                mouse = line
+
+        # 实际数量小与系统库存一个的时候，差异数量为-1
+        mouse.inventory_qty = mouse.real_qty - 1
+        mouse.onchange_qty()
+        # 此时鼠标数量-1，生成一个鼠标的出库单
+        self.inventory.generate_inventory()
+
+        # 鼠标进行批号管理，出库行必须选择一个批号
+        self.inventory.out_id.line_out_ids[0].lot_id = mouse_line.id
+        self.inventory.out_id.approve_order()
+        self.inventory.out_id.cancel_approved_order()
+
+    def test_get_difference_uos_qty(self):
+        ''' Test: _get_difference_uos_qty '''
+        for line in self.inventory.line_ids:
+            if line.goods_id.name == u'鼠标':
+                mouse = line
+
+        # 实际辅助数量少1个
+        mouse.inventory_uos_qty = mouse.inventory_qty - 1
+        mouse.onchange_uos_qty()
+        self.assertEqual(mouse.difference_uos_qty, -1)
+
+    def test_check_difference_identical(self):
+        ''' Test: check_difference_identical '''
+        for line in self.inventory.line_ids:
+            if line.goods_id.name == u'鼠标':
+                mouse = line
+
+        # 实际辅助数量少1个
+        mouse.inventory_uos_qty = mouse.inventory_qty - 1
+        mouse.onchange_uos_qty()
+        self.assertEqual(mouse.difference_uos_qty, -1)
+        # 盘盈盘亏数量应该与辅助单位的盘盈盘亏数量盈亏方向不一致
+        mouse.difference_qty = 1
+        mouse.check_difference_identical()
+
     def test_check_done(self):
         '''盘盈盘亏产生的入库单和出库单审核时检查'''
         self.inventory.query_inventory()
@@ -201,6 +251,23 @@ class TestInventory(TransactionCase):
     def test_inventory_get_default_warehouse(self):
         ''' 测试 获取盘点仓库 '''
         self.env['wh.inventory'].create({
-                                         'date': '2016-12-30',
-                                         'goods': '鼠标',
-                                         })
+            'date': '2016-12-30',
+            'goods': '鼠标',
+        })
+
+    def test_generate_inventory_twice(self):
+        '''重复点击生成盘点单据按钮'''
+        self.inventory.query_inventory()
+        self.inventory.generate_inventory()
+        with self.assertRaises(UserError):
+            self.inventory.generate_inventory()
+
+    def test_inventory_line_get_difference_qty(self):
+        '''_get_difference_qty：difference_qty=0,difference_uos_qty!=0'''
+        for line in self.inventory.line_ids:
+            if line.goods_id.name == u'鼠标':
+                mouse = line
+
+            # 实际辅助数量少1个 实际数量为1
+            mouse.inventory_uos_qty = mouse.inventory_qty - 1
+            self.assertEqual(mouse.difference_qty, -1)

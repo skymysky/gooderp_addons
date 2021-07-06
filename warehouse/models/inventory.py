@@ -11,7 +11,7 @@ from odoo import api
 from odoo.tools import float_compare, float_is_zero
 
 
-class wh_inventory(models.Model):
+class WhInventory(models.Model):
     _name = 'wh.inventory'
     _description = u'盘点单'
     _inherit = ['mail.thread']
@@ -28,7 +28,8 @@ class wh_inventory(models.Model):
     def _get_default_warehouse_impl(self):
         if self.env.context.get('warehouse_type', 'stock'):
             return self.env['warehouse'].get_warehouse_by_type(
-                    self.env.context.get('warehouse_type', 'stock'))
+                self.env.context.get('warehouse_type', 'stock'))
+
     @api.model
     def _get_default_warehouse(self):
         '''获取盘点仓库'''
@@ -40,8 +41,8 @@ class wh_inventory(models.Model):
                        help=u'单据编号，创建时会自动生成')
     warehouse_id = fields.Many2one('warehouse', u'仓库', required=True, default=_get_default_warehouse,
                                    help=u'盘点单盘点的仓库')
-    goods = fields.Many2many('goods',string=u'商品',
-                        help=u'盘点单盘点的商品')
+    goods = fields.Many2many('goods', string=u'商品',
+                             help=u'盘点单盘点的商品')
     out_id = fields.Many2one('wh.out', u'盘亏单据', copy=False,
                              help=u'盘亏生成的其他出库单单据')
     in_id = fields.Many2one('wh.in', u'盘盈单据', copy=False,
@@ -50,9 +51,9 @@ class wh_inventory(models.Model):
         INVENTORY_STATE, u'状态', copy=False, default='draft',
         index=True,
         help=u'盘点单状态，新建时状态为草稿;'
-             u'点击查询后为审核后状态为查询中;'
-             u'有盘亏盘盈时生成的其他出入库单没有审核时状态为待确认盘盈盘亏;'
-             u'盘亏盘盈生成的其他出入库单审核后状态为完成')
+             u'点击查询后为确认后状态为查询中;'
+             u'有盘亏盘盈时生成的其他出入库单没有确认时状态为待确认盘盈盘亏;'
+             u'盘亏盘盈生成的其他出入库单确认后状态为完成')
     line_ids = fields.One2many(
         'wh.inventory.line', 'inventory_id', u'明细', copy=False,
         help=u'盘点单的明细行')
@@ -72,24 +73,21 @@ class wh_inventory(models.Model):
     @api.model
     @create_name
     def create(self, vals):
-        return super(wh_inventory, self).create(vals)
+        return super(WhInventory, self).create(vals)
 
     @api.multi
     def unlink(self):
         for inventory in self:
-            if inventory.state == 'done':
-                raise UserError(u'不可以删除一个完成的单据')
-
             inventory.delete_confirmed_wh()
 
-        return super(wh_inventory, self).unlink()
+        return super(WhInventory, self).unlink()
 
     def delete_confirmed_wh(self):
         for inventory in self:
             if inventory.state == 'confirmed':
                 if (inventory.out_id and inventory.out_id.state == 'done') \
-                  or (inventory.in_id and inventory.in_id.state == 'done'):
-                    raise UserError(u'请先反审核掉相关的盘盈盘亏单据')
+                        or (inventory.in_id and inventory.in_id.state == 'done'):
+                    raise UserError(u'请先撤销掉相关的盘盈盘亏单据')
                 else:
                     inventory.out_id.unlink()
                     inventory.in_id.unlink()
@@ -99,13 +97,13 @@ class wh_inventory(models.Model):
     def check_done(self):
         for inventory in self:
             if inventory.state == 'confirmed' and \
-              (not inventory.out_id or inventory.out_id.state == 'done') and \
-              (not inventory.in_id or inventory.in_id.state == 'done'):
+                (not inventory.out_id or inventory.out_id.state == 'done') and \
+                    (not inventory.in_id or inventory.in_id.state == 'done'):
                 self.state = 'done'
                 return True
             if inventory.state == 'done' and \
-              (not inventory.out_id or inventory.out_id.state != 'done') and \
-              (not inventory.in_id or inventory.in_id.state != 'done'):
+                (not inventory.out_id or inventory.out_id.state != 'done') and \
+                    (not inventory.in_id or inventory.in_id.state != 'done'):
                 self.state = 'confirmed'
                 return True
         return False
@@ -168,6 +166,8 @@ class wh_inventory(models.Model):
     @api.multi
     def generate_inventory(self):
         for inventory in self:
+            if self.state in ['done', 'confirmed']:
+                raise UserError(u'请不要重复点击生成盘点单据按钮')
             out_line, in_line = [], []
             for line in inventory.line_ids:
                 if line.difference_qty < 0:
@@ -181,7 +181,7 @@ class wh_inventory(models.Model):
             if in_line:
                 self.create_overage_in(inventory, in_line)
 
-            if  len(out_line) + len(in_line) == 0:
+            if len(out_line) + len(in_line) == 0:
                 inventory.state = 'done'
 
             if out_line or in_line:
@@ -224,7 +224,8 @@ class wh_inventory(models.Model):
             if inventory.goods:
                 goods_ids = inventory.goods.ids
                 goods_ids.append(0)
-                extra_text += " AND goods.id IN {ids}".format(ids=tuple(set(goods_ids)))
+                extra_text += " AND goods.id IN {ids}".format(
+                    ids=tuple(set(goods_ids)))
 
             inventory.env.cr.execute(sql_text % extra_text)
             res = inventory.env.cr.dictfetchall()
@@ -235,7 +236,8 @@ class wh_inventory(models.Model):
                          ('attribute_id', '=', line['attribute_id']),
                          ('lot_id', '=', line['lot']),
                          ('warehouse_id', '=', line['warehouse_id']),
-                         ('type', '=', 'internal')]):
+                         ('type', '=', 'internal'),
+                         ('state', '=', 'draft')]):
                     line['qty'] -= int_line.goods_qty
                     line['uos_qty'] -= int_line.goods_uos_qty
                 if not line['qty']:
@@ -249,13 +251,13 @@ class wh_inventory(models.Model):
             inventory.delete_line()
             line_ids = inventory.get_line_detail()
             for line in line_ids:
-                line_obj.create_wh_inventory_line_by_data(inventory.id,line)
+                line_obj.create_wh_inventory_line_by_data(inventory.id, line)
             if line_ids:
                 inventory.state = 'query'
         return True
 
 
-class wh_inventory_line(models.Model):
+class WhInventoryLine(models.Model):
     _name = 'wh.inventory.line'
     _description = u'盘点单明细'
 
@@ -266,13 +268,13 @@ class wh_inventory_line(models.Model):
     ]
 
     @api.multi
-    @api.depends('inventory_qty', 'real_qty','inventory_uos_qty', 'real_uos_qty')
+    @api.depends('inventory_qty', 'real_qty', 'inventory_uos_qty', 'real_uos_qty')
     def _get_difference_qty(self):
         for line in self:
             line.difference_qty = line.inventory_qty - line.real_qty
             line.difference_uos_qty = line.inventory_uos_qty - line.real_uos_qty
 
-            if float_is_zero(line.difference_qty, 2) and not float_is_zero(line.difference_uos_qty,2):
+            if float_is_zero(line.difference_qty, 2) and not float_is_zero(line.difference_uos_qty, 2):
                 line.difference_qty = line.difference_uos_qty * line.goods_id.conversion
             if not float_is_zero(line.difference_qty, 2) and line.difference_uos_qty == 0:
                 line.difference_uos_qty = line.difference_qty / line.goods_id.conversion
@@ -363,7 +365,6 @@ class wh_inventory_line(models.Model):
             'inventory_uos_qty': line_data.get('uos_qty'),
         })
 
-
     def line_role_back(self):
         self.inventory_qty = self.real_qty
         self.inventory_uos_qty = self.real_uos_qty
@@ -429,18 +430,15 @@ class wh_inventory_line(models.Model):
                 'cost': cost,
             }
 
-            difference_qty, difference_uos_qty = abs(inventory.difference_qty), abs(inventory.difference_uos_qty)
+            difference_qty, difference_uos_qty = abs(
+                inventory.difference_qty), abs(inventory.difference_uos_qty)
 
-            # 差异数量为0，且差异辅助数量不为0时，用差异辅助数量。否则用差差异数量
-            if float_is_zero(difference_qty, 2) and not float_is_zero(difference_uos_qty, 2):
-                res.update({'goods_uos_qty': difference_uos_qty})
-            else:
-                res.update ({'goods_qty': difference_qty})
+            res.update({'goods_qty': difference_qty})
 
             return res
 
 
-class wh_out(models.Model):
+class WhOut(models.Model):
     _inherit = 'wh.out'
 
     inventory_ids = fields.One2many('wh.inventory', 'out_id', u'盘点单',
@@ -448,21 +446,22 @@ class wh_out(models.Model):
 
     @api.multi
     def approve_order(self):
-        res = super(wh_out, self).approve_order()
+        res = super(WhOut, self).approve_order()
         for order in self:
             order.inventory_ids.check_done()
 
         return res
+
     @api.multi
     def cancel_approved_order(self):
-        res = super(wh_out, self).cancel_approved_order()
+        res = super(WhOut, self).cancel_approved_order()
         for order in self:
             order.inventory_ids.check_done()
 
         return res
 
 
-class wh_in(models.Model):
+class WhIn(models.Model):
     _inherit = 'wh.in'
 
     inventory_ids = fields.One2many('wh.inventory', 'in_id', u'盘点单',
@@ -470,14 +469,15 @@ class wh_in(models.Model):
 
     @api.multi
     def approve_order(self):
-        res = super(wh_in, self).approve_order()
+        res = super(WhIn, self).approve_order()
         for order in self:
             order.inventory_ids.check_done()
 
         return res
+
     @api.multi
     def cancel_approved_order(self):
-        res = super(wh_in, self).cancel_approved_order()
+        res = super(WhIn, self).cancel_approved_order()
         for order in self:
             order.inventory_ids.check_done()
 

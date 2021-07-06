@@ -3,7 +3,8 @@
 import odoo.addons.decimal_precision as dp
 from odoo import fields, models, api, tools
 
-class sell_order_detail(models.Model):
+
+class SellOrderDetail(models.Model):
     _name = 'sell.order.detail'
     _description = u'销售明细表'
     _auto = False
@@ -24,7 +25,9 @@ class sell_order_detail(models.Model):
     tax_amount = fields.Float(u'税额', digits=dp.get_precision('Amount'))
     subtotal = fields.Float(u'价税合计', digits=dp.get_precision('Amount'))
     margin = fields.Float(u'毛利', digits=dp.get_precision('Amount'))
+    money_state = fields.Char(u'收款状态')
     note = fields.Char(u'备注')
+    last_receipt_date = fields.Date(string=u'最后收款日期')
 
     def init(self):
         cr = self._cr
@@ -54,7 +57,10 @@ class sell_order_detail(models.Model):
                         ELSE - wml.subtotal END) AS subtotal,
                     SUM(CASE WHEN wm.origin = 'sell.delivery.sell' THEN wml.goods_qty
                         ELSE - wml.goods_qty END) * (wml.price - wml.cost_unit) AS margin,
-                    wml.note AS note
+                    (CASE WHEN wm.origin = 'sell.delivery.sell' THEN sd.money_state
+                    ELSE sd.return_state END) AS money_state,
+                    wml.note AS note,
+                    mi.get_amount_date AS last_receipt_date
 
                 FROM wh_move_line AS wml
                     LEFT JOIN wh_move wm ON wml.move_id = wm.id
@@ -65,14 +71,16 @@ class sell_order_detail(models.Model):
                          OR wml.warehouse_dest_id = wh.id
                     LEFT JOIN uom ON goods.uom_id = uom.id
                     LEFT JOIN sell_delivery AS sd ON wm.id = sd.sell_move_id
+                    LEFT JOIN money_invoice AS mi ON mi.id = sd.invoice_id
 
                 WHERE wml.state = 'done'
                   AND wm.origin like 'sell.delivery%%'
                   AND wh.type = 'stock'
 
-                GROUP BY wm.date, wm.name, origin, wm.user_id, partner_id,
+                GROUP BY wm.date, wm.name, origin, wm.user_id, wm.partner_id,
                     goods_code, goods.id, attribute, wh.id, uom,
-                    wml.price, wml.cost_unit, wml.note
+                    wml.price, wml.cost_unit, sd.money_state, sd.return_state, wml.note,
+                    mi.get_amount_date
                 )
         """)
 
@@ -80,13 +88,14 @@ class sell_order_detail(models.Model):
     def view_detail(self):
         '''查看明细按钮'''
         self.ensure_one()
-        order = self.env['sell.delivery'].search([('name', '=', self.order_name)])
+        order = self.env['sell.delivery'].search(
+            [('name', '=', self.order_name)])
         if order:
             if not order.is_return:
                 view = self.env.ref('sell.sell_delivery_form')
             else:
                 view = self.env.ref('sell.sell_return_form')
-            
+
             return {
                 'name': u'销售发货单',
                 'view_type': 'form',

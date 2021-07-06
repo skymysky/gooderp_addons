@@ -1,17 +1,21 @@
 # -*- coding: utf-8 -*-
 from odoo.tests.common import TransactionCase
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 
 class TestMoveLine(TransactionCase):
     ''' 测试库存调拨 '''
+
     def setUp(self):
         super(TestMoveLine, self).setUp()
 
-        self.keyboard_mouse_in_line = self.browse_ref('warehouse.wh_move_line_keyboard_mouse_in_2')
-        self.keyboard_mouse_out_line = self.browse_ref('warehouse.wh_move_line_keyboard_mouse_in_2')
+        self.keyboard_mouse_in_line = self.browse_ref(
+            'warehouse.wh_move_line_keyboard_mouse_in_2')
+        self.keyboard_mouse_out_line = self.browse_ref(
+            'warehouse.wh_move_line_keyboard_mouse_in_2')
 
         self.mouse_in_line = self.browse_ref('warehouse.wh_move_line_12')
+        self.mouse_in_line.cost = self.mouse_in_line.cost_unit * self.mouse_in_line.goods_qty
         self.mouse_out_line = self.browse_ref('warehouse.wh_move_line_0')
 
         self.cable_int_line = self.browse_ref('warehouse.wh_move_line_17')
@@ -67,8 +71,7 @@ class TestMoveLine(TransactionCase):
             lot_id=self.mouse_out_line.lot_id)
 
         self.assertEqual(cost_unit, self.mouse_out_line.lot_id.cost_unit)
-        
-       
+
     def test_get_matching_records_by_lot(self):
         # 批次号未审核的时候获取批次信息会报错
         with self.assertRaises(UserError):
@@ -101,13 +104,16 @@ class TestMoveLine(TransactionCase):
 
     def test_attribute(self):
         '''在出库类型的明细行中，选择商品属性，lot_id的domain需要包含属性相关'''
-        self.env.ref('core.goods_category_1').account_id = self.env.ref('finance.account_goods').id
+        self.env.ref('core.goods_category_1').account_id = self.env.ref(
+            'finance.account_goods').id
         self.env.ref('warehouse.wh_in_wh_in_attribute').date = '2016-02-06'
 
         attribute_in = self.browse_ref('warehouse.wh_in_wh_in_attribute')
 
         white_iphone = self.browse_ref('warehouse.wh_move_line_iphone_in_1')
+        white_iphone.cost = white_iphone.cost_unit * white_iphone.goods_qty
         black_iphone = self.browse_ref('warehouse.wh_move_line_iphone_in_2')
+        black_iphone.cost = black_iphone.cost_unit * black_iphone.goods_qty
 
         out_iphone = self.browse_ref('warehouse.wh_move_line_iphone_out')
 
@@ -118,7 +124,7 @@ class TestMoveLine(TransactionCase):
         out_iphone.action_done()
         self.assertEqual(out_iphone.cost_unit, white_iphone.cost_unit)
 
-        out_iphone.action_cancel()
+        out_iphone.action_draft()
         out_iphone.attribute_id = black_iphone.attribute_id
 
         real_domain = [
@@ -190,18 +196,23 @@ class TestMoveLine(TransactionCase):
             self.keyboard_mouse_out_line.warehouse_id, self.keyboard_mouse_out_line.goods_qty)
         self.assertEqual(self.keyboard_mouse_out_line.cost_unit, cost_unit)
 
+        self.keyboard_mouse_out_line.goods_id = self.goods_cable
         self.keyboard_mouse_out_line.goods_uos_qty = 10
-        temp_goods_qty = self.keyboard_mouse_out_line.goods_id.conversion_unit(10)
-        #self.keyboard_mouse_out_line.onchange_goods_uos_qty()
-        #self.assertEqual(self.keyboard_mouse_out_line.goods_qty, temp_goods_qty)
+        temp_goods_qty = self.keyboard_mouse_out_line.goods_id.conversion_unit(
+            10)
+        self.keyboard_mouse_out_line.onchange_goods_uos_qty()
+        self.assertEqual(self.keyboard_mouse_out_line.goods_qty, temp_goods_qty)
 
         self.mouse_in_line.action_done()
         self.mouse_out_line.lot_qty = 0
         self.mouse_out_line.lot_id = self.mouse_in_line
-        self.mouse_out_line.with_context({'type': 'internal'}).onchange_lot_id()
+        self.mouse_out_line.with_context(
+            {'type': 'internal'}).onchange_lot_id()
         # 当传递type为internal的上下文值的时候，此时lot会设置为lot_id的lot
-        self.assertEqual(self.mouse_out_line.lot, self.mouse_out_line.lot_id.lot)
-        self.assertEqual(self.mouse_out_line.lot_qty, self.mouse_out_line.lot_id.qty_remaining)
+        self.assertEqual(self.mouse_out_line.lot,
+                         self.mouse_out_line.lot_id.lot)
+        self.assertEqual(self.mouse_out_line.lot_qty,
+                         self.mouse_out_line.lot_id.qty_remaining)
 
         self.mouse_in_line.discount_rate = 0
         self.mouse_in_line.onchange_discount_rate()
@@ -234,7 +245,15 @@ class TestMoveLine(TransactionCase):
         '''测试批号下拉的时候显示批次和剩余数量'''
         move_line = self.env.ref('warehouse.wh_move_line_12')
         result = self.env['wh.move.line'].name_search('ms160301')
-        real_result = [(move_line.id, move_line.lot + ' ' + move_line.warehouse_dest_id.name + u' 余 ' + str(move_line.goods_qty))]
+        real_result = [(move_line.id, move_line.lot + ' ' +
+                        move_line.warehouse_dest_id.name + u' 余 ' + str(move_line.goods_qty))]
+        self.assertEqual(result, real_result)
+
+    def test_name_search_args(self):
+        '''批号下拉时候以domain搜索'''
+        result = self.env['wh.move.line'].name_search(args=[('lot', '=', 'ms160301')])
+        real_result = [(self.mouse_in_line.id, self.mouse_in_line.lot + ' ' +
+                        self.mouse_in_line.warehouse_dest_id.name + u' 余 ' + str(self.mouse_in_line.goods_qty))]
         self.assertEqual(result, real_result)
 
     def test_compute_all_amount_wrong_tax_rate(self):
@@ -243,3 +262,41 @@ class TestMoveLine(TransactionCase):
             self.mouse_in_line.tax_rate = -1
         with self.assertRaises(UserError):
             self.mouse_in_line.tax_rate = 102
+
+    def test_compute_cost(self):
+        '''计算成本if语句'''
+        self.mouse_in_line.with_context({'type': 'in'}).price = 100
+        self.assertEqual(self.mouse_in_line.cost, 100)
+
+    def test_onchange_discount_amount(self):
+        '''当优惠金额发生变化时'''
+        self.assertEqual(self.mouse_in_line.cost, 40)
+        self.assertEqual(self.mouse_in_line.cost_unit, 40)
+        self.mouse_in_line.with_context({'type': 'in'}).discount_amount = 5
+        self.mouse_in_line.onchange_discount_amount()
+        self.assertEqual(self.mouse_in_line.cost, 35)
+        self.assertEqual(self.mouse_in_line.cost_unit, 40)  # fixme:单位成本并没发生变化
+
+    def test_check_goods_qty(self):
+        '''序列号管理的商品数量必须为1'''
+        # 鼠标进行了序列号管理
+        with self.assertRaises(ValidationError):
+            self.mouse_in_line.goods_qty = 2
+
+    def test_action_done_no_lot_raise_error(self):
+        '''检查属性或批号是否填充'''
+        # type=in,lot为空
+        self.mouse_in_line.lot = False
+        with self.assertRaises(UserError):
+            self.mouse_in_line.action_done()
+
+        # type=out,lot_id为空
+        self.mouse_out_line.lot_id = False
+        with self.assertRaises(UserError):
+            self.mouse_out_line.action_done()
+
+        # 属性为空
+        keyboard_line = self.env.ref('warehouse.wh_move_line_13')
+        keyboard_line.attribute_id = False
+        with self.assertRaises(UserError):
+            keyboard_line.action_done()

@@ -4,9 +4,29 @@ import odoo.addons.decimal_precision as dp
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
+
+groupby_original = models.BaseModel._read_group_process_groupby
+
+
+@api.model
+def _read_group_process_groupby(self, gb, query):
+    res = groupby_original(self, gb, query)
+    split = gb.split(':')
+    gb_function = split[1] if len(split) == 2 else None
+    if gb_function and gb_function == 'day':
+        res['display_format'] = 'yyyy-MM-dd'    # 按 day 分组显示格式
+    if (gb_function and gb_function == 'month') or not gb_function:
+        res['display_format'] = 'yyyy-MM'   # 按 month 分组显示格式
+    return res
+
+
+models.BaseModel._read_group_process_groupby = _read_group_process_groupby
+
+
 # 单据自动编号，避免在所有单据对象上重载
 
 create_original = models.BaseModel.create
+
 
 @api.model
 @api.returns('self', lambda value: value.id)
@@ -18,7 +38,49 @@ def create(self, vals):
     record_id = create_original(self, vals)
     return record_id
 
+
 models.BaseModel.create = create
+
+
+# 不能删除已确认的单据，避免在所有单据对象上重载
+
+unlink_original = models.BaseModel.unlink
+
+
+@api.multi
+def unlink(self):
+    for record in self:
+        if 'state' in record._fields.keys():
+            if record.state == 'done':
+                raise UserError(u'不能删除已确认的单据！')
+
+        unlink_original(record)
+
+
+models.BaseModel.unlink = unlink
+
+
+class BaseModelExtend(models.AbstractModel):
+    _name = 'basemodel.extend'
+
+    '''
+    增加作废方法
+    '''
+    def _register_hook(self):
+        '''
+        Register method in BaseModel 
+        '''
+        @api.multi
+        def action_cancel(self):
+            for record in self:
+                if record.state != 'draft':
+                    raise UserError(u'只能作废草稿状态的单据')
+                else:
+                    record.state = 'cancel'
+            return True
+        models.BaseModel.action_cancel = action_cancel
+        return super(BaseModelExtend, self)._register_hook()
+
 
 # 分类的类别
 
@@ -35,7 +97,7 @@ CORE_CATEGORY_TYPE = [('customer', u'客户'),
 # 当客户要求下拉字段可编辑，可使用此表存储可选值，按type分类，在字段上用domain和context筛选
 
 
-class core_value(models.Model):
+class CoreValue(models.Model):
     _name = 'core.value'
     _description = u'可选值'
 
@@ -55,7 +117,7 @@ class core_value(models.Model):
     ]
 
 
-class core_category(models.Model):
+class CoreCategory(models.Model):
     _name = 'core.category'
     _description = u'类别'
     _order = 'type, name'
@@ -76,8 +138,16 @@ class core_category(models.Model):
         ('name_uniq', 'unique(type, name)', '同类型的类别不能重名')
     ]
 
+    @api.multi
+    def unlink(self):
+        for record in self:
+            if record.note:
+                raise UserError(u'不能删除系统创建的类别')
 
-class uom(models.Model):
+        return super(CoreCategory, self).unlink()
+
+
+class Uom(models.Model):
     _name = 'uom'
     _description = u'计量单位'
 
@@ -94,7 +164,7 @@ class uom(models.Model):
     ]
 
 
-class settle_mode(models.Model):
+class SettleMode(models.Model):
     _name = 'settle.mode'
     _description = u'结算方式'
 
@@ -111,7 +181,7 @@ class settle_mode(models.Model):
     ]
 
 
-class staff(models.Model):
+class Staff(models.Model):
     _name = 'staff'
     _description = u'员工'
 
@@ -127,16 +197,18 @@ class staff(models.Model):
     def _check_user_id(self):
         '''一个员工只能对应一个用户'''
         if self.user_id:
-            staffs = self.env['staff'].search([('user_id', '=', self.user_id.id)])
+            staffs = self.env['staff'].search(
+                [('user_id', '=', self.user_id.id)])
             if len(staffs) > 1:
                 raise UserError(u'用户 %s 已有对应员工' % self.user_id.name)
 
 
-class bank_account(models.Model):
+class BankAccount(models.Model):
     _name = 'bank.account'
     _description = u'账户'
 
     name = fields.Char(u'名称', required=True)
+    num = fields.Char(u'账号')
     balance = fields.Float(u'余额', readonly=True,
                            digits=dp.get_precision('Amount'))
     active = fields.Boolean(u'启用', default=True)
@@ -151,8 +223,7 @@ class bank_account(models.Model):
     ]
 
 
-
-class service(models.Model):
+class Service(models.Model):
     ''' 是对其他收支业务的更细分类 '''
     _name = 'service'
     _description = u'收支项'
@@ -173,4 +244,3 @@ class service(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
-

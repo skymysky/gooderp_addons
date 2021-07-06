@@ -6,6 +6,7 @@ odoo.define('warehouse.wave', function(require) {
     var Model = require('web.Model');
     var core = require('web.core');
     var Widget = require('web.Widget');
+    var session = require('web.session');
 
     var QWeb = core.qweb;
     var _t = core._t;
@@ -27,10 +28,22 @@ odoo.define('warehouse.wave', function(require) {
                                 menu.do_reload_needaction();
                             }
                         }).then(function() {
-                            new Model("do.pack").call("scan_barcode", [self.model, $this.val(), self.datarecord.id]).then(
+                            var input_code = $this.val();
+                            self.$el.find('input').val('');
+                            new Model("do.pack").call("scan_barcode", [self.model, input_code, self.datarecord.id]).then(
                                 function(result) {
-                                    // TODO 如何让barcode自动获得焦点
+                                    var audio;
+                                    audio = new Audio();
+                                    var ext = audio.canPlayType("audio/ogg; codecs=vorbis") ? ".ogg" : ".mp3";
+                                    if (result != 'done'){
+                                        audio.src = session.url("/mail/static/src/audio/ting" + ext);
+                                        audio.play();
+                                    }
                                     if (result == 'done'){
+                                        audio.src = session.url("/warehouse_wave/static/src/js/done.mp3");
+                                        audio.play();
+
+                                        // 让barcode自动获得焦点
                                         self.do_action({
                                         type: 'ir.actions.act_window',
                                         res_model: "do.pack",
@@ -40,8 +53,7 @@ odoo.define('warehouse.wave', function(require) {
                                         target: 'inline',
                                         });
                                     }else{
-                                    self.reload();
-                                    self.$el.find('input').val('');
+                                        self.reload();
                                     }
                                 }
                             );
@@ -68,7 +80,9 @@ odoo.define('warehouse.wave', function(require) {
                         res[res_keys[res_key]] = result[i+1][res_keys[res_key]]
                     }
                     JSON.stringify(res)
-                    all_print.append($(QWeb.render('temp_detail_info', {'detail_infos': res})));
+                    // 去掉打印装箱单数据
+                    // all_print.append($("<div style='page-break-after:always;'></div>"));
+                    // all_print.append($(QWeb.render('temp_detail_info', {'detail_infos': res})));
 
                     all_print.append($("<div style='page-break-after:always;'></div>"));
                 }

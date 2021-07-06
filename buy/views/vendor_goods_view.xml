@@ -10,7 +10,7 @@
                 <xpath expr='//div' position='before'>
                     <div class="oe_button_box" name="button_box">
                         <button type="object"
-                                string="购货记录"
+                                string="购货记录(最近1年)"
                                 name="action_view_buy_history"
                                 class="oe_stat_button"
                                 icon="fa-list-alt">
@@ -33,6 +33,7 @@
                                 <tree string="联系人地址" editable="bottom">
 	                    	        <field name="contact" required="1"/>
 	                    	        <field name="mobile" required="1"/>
+                                    <field name="job"/>
 	                    	        <field name="phone"/>
 	                    	        <field name="qq"/>
                                     <field name="email" widget="email"/>
@@ -65,7 +66,7 @@
             <field name="model">goods</field>
             <field name="inherit_id" ref="goods.goods_form"/>
             <field name="arch" type="xml">
-                <field name="attribute_ids" position="before">
+                <field name="supplier_id" position="after">
                     <field name="vendor_ids" colspan="2" nolabel="1" groups='goods.view_cost_groups'>
                         <tree string="goods" editable="bottom">
                             <field name="vendor_id"

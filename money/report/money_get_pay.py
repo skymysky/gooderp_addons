@@ -11,7 +11,7 @@ MONEY_TYPE = [
 ]
 
 
-class money_get_pay_report(models.Model):
+class MoneyGetPayReport(models.Model):
     _name = "money.get.pay.report"
     _description = u"资金收支报表"
     _auto = False
@@ -67,9 +67,9 @@ class money_get_pay_report(models.Model):
                         omo.type,
                         omo.partner_id,
                         omol.category_id,
-                        (CASE WHEN omo.type = 'other_get' THEN omol.amount ELSE 0 END) AS get,
-                        (CASE WHEN omo.type = 'other_pay' THEN omol.amount ELSE 0 END) AS pay,
-                        (CASE WHEN omo.type = 'other_get' THEN omol.amount ELSE -omol.amount END) AS amount
+                        (CASE WHEN omo.type = 'other_get' THEN omol.amount + omol.tax_amount ELSE 0 END) AS get,
+                        (CASE WHEN omo.type = 'other_pay' THEN omol.amount + omol.tax_amount ELSE 0 END) AS pay,
+                        (CASE WHEN omo.type = 'other_get' THEN omol.amount + omol.tax_amount ELSE -(omol.amount + omol.tax_amount) END) AS amount
                 FROM other_money_order AS omo
                 LEFT JOIN other_money_order_line AS omol ON omo.id = omol.other_money_id
                 WHERE omo.state = 'done'

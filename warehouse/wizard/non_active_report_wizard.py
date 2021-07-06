@@ -6,17 +6,20 @@ import pytz
 from lxml import etree
 
 
-class non_active_report(models.TransientModel):
+class NonActiveReport(models.TransientModel):
     _name = 'non.active.report'
     _description = u'呆滞料报表'
 
     warehouse_id = fields.Many2one('warehouse', string=u'仓库')
     goods_id = fields.Many2one('goods', string=u'商品')
+    attribute_id = fields.Many2one('attribute', string=u'属性')
     first_stage_day_qty = fields.Float(string=u'第一阶段数量')
     second_stage_day_qty = fields.Float(string=u'第二阶段数量')
     third_stage_day_qty = fields.Float(string=u'第三阶段数量')
     four_stage_day_qty = fields.Float(string=u'第四阶段数量')
     subtotal = fields.Float(u'合计')
+    latest_move_date = fields.Datetime(u'最后发货日期')
+    latest_move_qty = fields.Float(u'最后发货数量')
 
     @api.model
     def fields_view_get(self, view_id=None, view_type='form', toolbar=False, submenu=False):
@@ -28,13 +31,15 @@ class non_active_report(models.TransientModel):
         :param submenu:
         :return:
         """
-        res = super(non_active_report, self).fields_view_get(
+        res = super(NonActiveReport, self).fields_view_get(
             view_id=view_id, view_type=view_type, toolbar=toolbar, submenu=submenu)
         if self._context.get('first_stage_day'):
-            now_date = datetime.strftime(datetime.now(pytz.timezone("UTC")), '%Y-%m-%d')
+            now_date = datetime.strftime(
+                datetime.now(pytz.timezone("UTC")), '%Y-%m-%d')
             doc = etree.XML(res['arch'])
             for node in doc.xpath("//field[@name='first_stage_day_qty']"):
-                node.set('string', u"0~%s天" % (self._context.get('first_stage_day')))
+                node.set('string', u"0~%s天" %
+                         (self._context.get('first_stage_day')))
             for node in doc.xpath("//field[@name='second_stage_day_qty']"):
                 node.set('string',
                          u"%s天~%s天" % (self._context.get('first_stage_day'), self._context.get('second_stage_day')))
@@ -42,12 +47,13 @@ class non_active_report(models.TransientModel):
                 node.set('string',
                          u"%s天~%s天" % (self._context.get('second_stage_day'), self._context.get('third_stage_day')))
             for node in doc.xpath("//field[@name='four_stage_day_qty']"):
-                node.set('string', u"大于%s天" % (self._context.get('third_stage_day')))
+                node.set('string', u"大于%s天" %
+                         (self._context.get('third_stage_day')))
             res['arch'] = etree.tostring(doc)
         return res
 
 
-class non_active_report_wizard(models.TransientModel):
+class NonActiveReportWizard(models.TransientModel):
     _name = 'non.active.report.wizard'
     _description = u'呆滞料报表向导'
 
@@ -75,7 +81,8 @@ class non_active_report_wizard(models.TransientModel):
             wahouse_id_sql = "AND wh_dest.id =%s" % (warehouse_id.id)
         else:
             wahouse_id_sql = "AND 1=1"
-        now_date = datetime.strftime(datetime.now(pytz.timezone("UTC")), '%Y-%m-%d')
+        now_date = datetime.strftime(
+            datetime.now(pytz.timezone("UTC")), '%Y-%m-%d')
         vals = {'now_date': now_date, 'first_stage_day': first_stage_day, 'wahouse_id_sql': wahouse_id_sql,
                 'second_stage_day': second_stage_day, 'third_stage_day': third_stage_day}
 
@@ -83,6 +90,9 @@ class non_active_report_wizard(models.TransientModel):
             select
                 stage_goods_date.warehouse_dest_id as warehouse_id,
                 stage_goods_date.goods_id as goods_id,
+                stage_goods_date.attribute_id as attribute_id,
+                NULL as latest_move_date,
+                NULL as latest_move_qty,
                 COALESCE(sum(stage_goods_date.first_stage),0) as first_stage_day_qty,
                 COALESCE(sum(stage_goods_date.second_stage),0) as second_stage_day_qty,
                 COALESCE(sum(stage_goods_date.third_stage),0) as third_stage_day_qty,
@@ -106,6 +116,7 @@ class non_active_report_wizard(models.TransientModel):
                                   sum(line.qty_remaining)
                               end as four_stage,
                           line.goods_id as goods_id,
+                          line.attribute_id as attribute_id,
 
                           line.warehouse_dest_id as warehouse_dest_id,
                           sum(line.qty_remaining) as subtotal
@@ -115,8 +126,8 @@ class non_active_report_wizard(models.TransientModel):
                       where line.state = 'done'
                         %(wahouse_id_sql)s
                       AND  wh_dest.type='stock'
-                      GROUP BY line.warehouse_dest_id,line.goods_id,line.date) as stage_goods_date
-              GROUP BY  stage_goods_date.warehouse_dest_id,stage_goods_date.goods_id
+                      GROUP BY line.warehouse_dest_id,line.goods_id,line.attribute_id,line.date) as stage_goods_date
+              GROUP BY  stage_goods_date.warehouse_dest_id,stage_goods_date.goods_id,stage_goods_date.attribute_id
         ''' % vals)
         return self.env.cr.dictfetchall()
 
@@ -132,6 +143,17 @@ class non_active_report_wizard(models.TransientModel):
         non_active_id_list = []
         for vals in data_vals_list:
             if vals.get('subtotal', 0) != 0:
+                # 更新最后发货日期和最后发货数量
+                latest_move_line = self.env['wh.move.line'].search([
+                    ('state', '=', 'done'),
+                    ('goods_id', '=', vals.get('goods_id')),
+                    ('attribute_id', '=', vals.get('attribute_id')),
+                    ('warehouse_id.type', '=', 'stock'),
+                    ('warehouse_dest_id.type', '=', 'customer')], order='write_date DESC', limit=1)
+                if latest_move_line:
+                    vals['latest_move_date'] = latest_move_line.write_date
+                    vals['latest_move_qty'] = latest_move_line.goods_qty
+
                 active_row = self.env['non.active.report'].create(vals)
                 non_active_id_list.append(active_row.id)
 

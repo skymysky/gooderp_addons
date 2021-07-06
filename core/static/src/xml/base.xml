@@ -35,27 +35,9 @@
 			<span name="delete" class="fa fa-trash-o"/>
 		</td>
 	</tr>
-	<t t-extend="UserMenu">
-		<t t-jquery=".o_user_menu" t-operation="before">
-			<li class="o_user_menu">
-				<p class='o_company' href="#"  style="height:35px ;margin:0 0 0 0" ><img class=" oe_top_company_bar_avatar"
-					 t-att-src="_s + '/web/static/src/img/user_menu_avatar.png'" style="height:35px;"/>
-				<span class="oe_topbar_company_name" style="color:white"/></p>
-				<ul></ul>
-			</li>
-		</t>
-		<t t-jquery="li > a[data-menu='documentation']" t-operation="replace"></t>
-		<t t-jquery="li.divider" t-operation="replace">
-		</t>
-		<t t-jquery="li > a[data-menu='support']" t-operation="replace">
-		</t>
-		<t t-jquery="li > a[data-menu='account']" t-operation="replace">
-		</t>
-	</t>
 	 <t t-extend="ListView">
        <t t-jquery="thead" t-operation="replace">
            <thead>
-			    <tr id="GoodERP_AD"><a href="https://item.taobao.com/item.htm?id=550421434967" target="_blank"><img src="/core/static/src/img/GoodERP_AD.jpg" width="100%"/></a></tr>
                 <tr t-if="options.header">
                     <t t-foreach="columns" t-as="column" >
                         <th t-if="column.meta" rowspan="2" colspan="1">
@@ -74,7 +56,7 @@
                             ><div>
                             <t t-if="column.tag !== 'button'"  ><t t-raw="column.heading()"/></t>
                         </div></th>
-                         <th t-if="!column.meta and column.invisible !== '1' and column.merge=='False' "   rowspan="1" colspan="2" style='text-align:center;'><div>
+                         <th t-if="!column.meta and column.invisible !== '1' and column.merge=='False' "   rowspan="1" t-att-colspan="column.colspan" style='text-align:center;'><div>
                             <t t-if="column.tag !== 'button'"  ><t t-esc="column.base_string"/></t>
                         </div></th>
                     </t>
@@ -112,6 +94,7 @@
 	<t t-extend="HiddenInputFile" t-name="HiddenInputPDFFile">
         <t t-jquery="input[type='file']:first" t-operation="replace">
             <input type="file" class="o_form_input_file" name="ufile" accept="application/pdf" />
+            <input t-if="widget.widget=='image'" type="file" class="o_form_input_file" name="ufile" accept="image/jpeg,image/jpg,image/png"/>
         </t>
     </t>
 	<t t-extend="FieldMany2ManyTag">
@@ -122,4 +105,7 @@
 			</span>
 		</t>
 	</t>
+    <t t-name="BetterList">
+        <iframe marginheight="0" marginwidth="0" width="100%" height="100%" src="http://www.gooderp.org" frameborder="0" allowfullscreen="True"></iframe>
+    </t>
  </template>
